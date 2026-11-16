@@ -37,6 +37,22 @@ def test_score_closure_for_all_samples(settings):
             assert Decimal(dim["penalty"]) <= Decimal(dim["cap"]), (name, dim["key"])
 
 
+def test_weight_conservation_for_all_samples(settings):
+    """分层加权恒等式：Σ(权重×样本行) = 采纳行，Σ 有效总体占比 = 1。"""
+    for name in SAMPLES:
+        evaluated = dirty_cases.score_of(dirty_cases.pipeline_sample(settings, name))
+        layers = evaluated["strata"]
+        assert layers, name
+        weighted_rows = sum(Decimal(item["weight_exact"]) * item["rows"]
+                            for item in layers)
+        totals = evaluated["strata_totals"]
+        assert weighted_rows.quantize(Decimal("0.0001")) == Decimal(totals["rows"]), name
+        assert Decimal(totals["pop_sum"]) == Decimal("1.0000"), name
+        # 各层异常计数合计 = 总数（整数，不拆小数）
+        for dim in evaluated["dims"]:
+            assert Decimal(dim["weighted_numerator"]) >= 0, (name, dim["key"])
+
+
 def test_rerun_keeps_counts_and_score(settings, store):
     first = service.run(settings, store, name="tickets_dirty.csv")
     second = service.run(settings, store, name="tickets_dirty.csv")

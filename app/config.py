@@ -5,6 +5,8 @@
 - 时间入库 UTC，页面按 Asia/Shanghai(+08:00) 展示；
 - 单元格三态：missing（空/空白/哨兵）/ format_bad（无法解析或越界）/ value；
 - 评分 = 100 − 缺失 30 − 重复 25 − 离群 20 − 格式 25，每维按容忍度封顶；
+- 主评分按渠道事后分层加权：层权重 = 有效总体占比 ÷ 样本占比，权重只进
+  层汇总不打碎记录，异常计数保持整数可追行号；
 - 缺失连续段判定：同一列按原始行序连续缺 ≥3 个单元格。
 """
 from __future__ import annotations
@@ -23,6 +25,7 @@ UTC = dt.timezone.utc
 RULE_VERSION = "qualiscore/1.0.0"
 SCORE_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.0001")
+WEIGHT_QUANT = Decimal("0.000001")
 HUNDRED = Decimal("100")
 
 # 稳健 z：0.6745 是正态分布四分位距与标准差的换算系数
@@ -126,6 +129,20 @@ WEIGHTS: tuple[dict, ...] = (
     {"key": "format", "label": "格式", "cap": "25", "tolerance": "0.0500"},
 )
 WEIGHT_MAP = {item["key"]: item for item in WEIGHTS}
+
+# 实际接单结构（评分的目标总体）：月度工单渠道占比，来自接单系统台账。
+# 抽检为覆盖低量渠道会刻意超抽，主评分按「层权重 = 总体占比 ÷ 样本占比」
+# 事后分层加权还原；占比合计必须等于 1，且参与规则摘要（改了即换规则）。
+CHANNEL_POPULATION: tuple[dict, ...] = (
+    {"channel": "电话", "share": "0.45"},
+    {"channel": "在线", "share": "0.35"},
+    {"channel": "邮件", "share": "0.12"},
+    {"channel": "门店", "share": "0.08"},
+)
+POPULATION_MAP = {item["channel"]: Decimal(item["share"])
+                  for item in CHANNEL_POPULATION}
+# 渠道缺失或格式不合格的行：单列「未明」层，按样本占比代表自身（权重 1），不外推
+UNKNOWN_CHANNEL = "未明"
 
 GRADES: tuple[dict, ...] = (
     {"grade": "A", "floor": "90", "label": "可用"},

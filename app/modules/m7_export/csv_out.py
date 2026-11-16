@@ -8,6 +8,8 @@ from __future__ import annotations
 import csv
 import io
 
+from ...errors import BadRequest
+
 BOM = "\ufeff"
 
 
@@ -23,14 +25,24 @@ def csv_text(header: list[str], rows: list[list]) -> str:
 def report_csv(result: dict) -> str:
     score = result["score"]
     counters = result["manifest"]["counters"]
+    weighting = score.get("weighting") or {"applied": False}
     rows = [
         ["总分", score["score"], "分", "刻度 0.01"],
         ["等级", score["grade"], "", score["grade_label"]],
         ["扣分合计", score["penalty_sum"], "分", "总分 + 扣分 = 100"],
     ]
+    if weighting.get("applied"):
+        rows.append(["加权口径", "渠道事后分层", "", weighting["note"]])
     for item in score["dims"]:
-        rows.append([f"{item['label']}扣分", item["penalty"], "分",
-                     f"比率 {item['rate']} 容忍度 {item['tolerance']} 封顶 {item['cap']}"])
+        if weighting.get("applied"):
+            note = (f"加权比率 {item['rate']} = 加权 {item['weighted_numerator']}"
+                    f"/{item['weighted_denominator']}；样本比率 {item['sample_rate']}"
+                    f" = {item['numerator']}/{item['denominator']}；"
+                    f"容忍度 {item['tolerance']} 封顶 {item['cap']}")
+        else:
+            note = (f"比率 {item['rate']} 容忍度 {item['tolerance']}"
+                    f" 封顶 {item['cap']}")
+        rows.append([f"{item['label']}扣分", item["penalty"], "分", note])
     rows.extend([
         ["原始记录", counters["raw_records"], "行", "含空行与隔离行"],
         ["采纳行", counters["accepted"], "行", ""],
@@ -43,6 +55,34 @@ def report_csv(result: dict) -> str:
         ["离群单元格", counters["outlier_cells"], "格", "有值的子集"],
     ])
     return csv_text(["项目", "数值", "单位", "备注"], rows)
+
+
+def strata_csv(result: dict) -> str:
+    """渠道分层权重表：每层整数计数可追行号，合计行与计数器逐项对账。"""
+    score = result["score"]
+    if not (score.get("weighting") or {}).get("applied"):
+        raise BadRequest("该运行记录为旧规则快照，无分层口径；重新运行后即可导出",
+                         code="E_STRATA_MISSING")
+    counters = result["manifest"]["counters"]
+    rows = []
+    for item in score["strata"]:
+        rows.append([
+            item["channel"], item["rows"], item["sample_share"],
+            item["pop_share"], item["weight"], item["weighted_rows"],
+            item["cells_missing"], item["rows_dup"], item["outlier_cells"],
+            item["tested_cells"], item["format_bad"],
+        ])
+    totals = score["strata_totals"]
+    rows.append([
+        "合计", totals["rows"], "1.0000", totals["pop_sum"],
+        "", totals["weighted_rows"],
+        counters["cells_missing"], counters["rows_dup"],
+        counters["outlier_cells"], counters["tested_cells"],
+        counters["cells_format_bad"],
+    ])
+    return csv_text(["渠道", "样本行", "样本占比", "有效总体占比", "权重",
+                     "加权行", "缺失格", "重复行", "离群格", "参检格",
+                     "格式不合格格"], rows)
 
 
 def profile_csv(result: dict) -> str:

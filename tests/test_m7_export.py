@@ -1,9 +1,12 @@
 """M7 报告导出：CSV 编码、内容稳定、证据行、清单、空态。"""
 from __future__ import annotations
 
+import copy
 import json
 
 from app import config
+from app.modules.m6_score import runstore
+from app.modules.m6_score import service as score_service
 from fixtures import expected
 
 
@@ -19,8 +22,10 @@ def test_report_csv_has_bom_and_core_rows(client_with_run):
     assert text.startswith("\ufeff")
     assert "\r\n" in text
     assert f"总分,{expected.DIRTY['score']},分" in text
-    assert "扣分合计,34.76,分" in text
+    assert f"扣分合计,{expected.DIRTY['penalty_sum']},分" in text
     assert f"等级,{expected.DIRTY['grade']}" in text
+    assert "加权口径,渠道事后分层" in text
+    assert "加权比率 0.0304" in text and "样本比率 0.0275" in text
 
 
 def test_csv_output_is_stable_across_requests(client_with_run):
@@ -77,15 +82,69 @@ def test_manifest_json_matches_run(client_with_run):
     assert payload["run_id"] == latest["run"]["run_id"]
     assert payload["input_digest"] == latest["run"]["digest"]
     assert payload["score"] == expected.DIRTY["score"]
-    assert len(payload["accounts"]) == 5
+    assert len(payload["accounts"]) == 7
     assert payload["all_balanced"] is True
     assert isinstance(payload["weights"], list) and len(payload["weights"]) == 4
+    assert payload["weighting"]["scheme"] == "post-stratification"
+    assert {item["channel"] for item in payload["population"]} == {
+        "电话", "在线", "邮件", "门店"}
+    assert len(payload["strata"]) == 4
+    assert payload["strata_totals"]["weighted_rows"] == "51.0000"
+
+
+def test_strata_csv_reconciles_with_counters(client_with_run):
+    """分层权重表与报告同一口径：合计行逐项等于计数器，页面导出一致。"""
+    text = get_csv(client_with_run, "strata.csv")
+    lines = [line for line in text.splitlines() if line.strip()]
+    assert lines[0].lstrip("﻿") == ("渠道,样本行,样本占比,有效总体占比,权重,"
+                                    "加权行,缺失格,重复行,离群格,参检格,格式不合格格")
+    assert len(lines) == len(expected.DIRTY_STRATA) + 2  # 表头 + 4 层 + 合计
+    assert "邮件,10,0.1961,0.1200,0.612000,6.1200,3,0,4,20,0" in text
+    counters = expected.DIRTY
+    total = lines[-1].split(",")
+    assert total[0] == "合计"
+    assert total[1] == str(counters["accepted"])
+    assert total[2] == "1.0000"
+    assert total[3] == "1.0000"
+    assert total[5] == "51.0000"
+    assert total[6] == str(counters["cells_missing"])
+    assert total[7] == str(counters["rows_dup"])
+    assert total[8] == str(counters["outlier_cells"])
+    assert total[9] == str(counters["tested_cells"])
+    assert total[10] == str(counters["cells_format_bad"])
 
 
 def test_export_without_run_returns_404(client):
     response = client.get("/api/export/report.csv")
     assert response.status_code == 404
     assert response.json()["error"] == "E_RUN_NOT_FOUND"
+
+
+def test_legacy_snapshot_without_weighting_degrades(client, settings, store):
+    """旧规则快照（无分层口径）：页面降级渲染，分层导出明确拒绝并提示重跑。"""
+    result = score_service.run(settings, store, name="tickets_dirty.csv")
+    legacy = copy.deepcopy(result)
+    for key in ("weighting", "strata", "population", "strata_totals"):
+        legacy["score"].pop(key, None)
+    for dim in legacy["score"]["dims"]:
+        for key in ("sample_rate", "weighted_numerator", "weighted_denominator"):
+            dim.pop(key, None)
+    legacy["run"]["run_id"] = "QS-LEGACY-0001"
+    legacy["run"]["name"] = "legacy.csv"
+    legacy["run"]["version"] = 1
+    runstore.persist(store, legacy)
+
+    page = client.get("/?run_id=QS-LEGACY-0001")
+    assert page.status_code == 200, page.text
+    assert "有效总体占比" not in page.text
+
+    response = client.get("/api/export/strata.csv?run_id=QS-LEGACY-0001")
+    assert response.status_code == 400
+    assert response.json()["error"] == "E_STRATA_MISSING"
+
+    report = client.get("/api/export/report.csv?run_id=QS-LEGACY-0001")
+    assert report.status_code == 200
+    assert "加权口径" not in report.content.decode("utf-8")
 
 
 def test_report_page_renders_score_and_bars(client_with_run):

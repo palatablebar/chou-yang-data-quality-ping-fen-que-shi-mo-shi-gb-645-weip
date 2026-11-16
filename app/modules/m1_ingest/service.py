@@ -81,7 +81,8 @@ def ingest(settings: config.Settings, *, name: str | None = None,
     }
     return {
         "name": dataset_name,
-        "digest": manifest.digest_bytes(data),
+        # 幂等键含规则摘要：改阈值或总体结构即换摘要，同输入重跑才复用旧记录
+        "digest": manifest.input_digest(dataset_name, data, settings.rule_version),
         "encoding": decoded.encoding,
         "declared_encoding": declared,
         "delimiter": delimiter,

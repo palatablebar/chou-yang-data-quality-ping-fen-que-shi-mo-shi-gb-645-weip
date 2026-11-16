@@ -8,8 +8,9 @@ from fixtures import dirty_cases, expected
 
 SAMPLE_DIR = Path(__file__).resolve().parent.parent / "sample_data"
 PAGES = ("/", "/profile", "/missing", "/duplicates", "/outliers", "/batches")
-EXPORTS = ("report.csv", "profile.csv", "missing.csv", "duplicates.csv",
-           "outliers.csv", "quarantine.csv", "flags.csv", "manifest.json")
+EXPORTS = ("report.csv", "strata.csv", "profile.csv", "missing.csv",
+           "duplicates.csv", "outliers.csv", "quarantine.csv", "flags.csv",
+           "manifest.json")
 
 
 def test_full_pipeline_over_http(client):

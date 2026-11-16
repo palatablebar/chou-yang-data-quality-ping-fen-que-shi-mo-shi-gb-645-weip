@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import time
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from ... import config, manifest
 from ..m1_ingest import service as m1_service
@@ -17,6 +17,7 @@ from ..m4_duplicates import service as m4_service
 from ..m5_outliers import service as m5_service
 from . import runstore
 from . import score as score_mod
+from . import strata as strata_mod
 
 
 def run(settings: config.Settings, store, *, name: str | None = None,
@@ -73,7 +74,9 @@ def run(settings: config.Settings, store, *, name: str | None = None,
         "outlier_cells": outliers["counts"]["outlier_cells"],
         "tested_cells": outliers["counts"]["tested_cells"],
     }
-    scored = score_mod.evaluate(counts)
+    strata_info = strata_mod.weigh(
+        strata_mod.assign(profile, duplicates, outliers))
+    scored = score_mod.evaluate(counts, strata=strata_info)
     stages.append(_stage("score", len(scored["dims"]), 1, 0, clock))
 
     reconcile = _reconcile(ingest, profile, missing, duplicates, outliers, scored)
@@ -186,6 +189,7 @@ def _reconcile(ingest: dict, profile: dict, missing: dict, duplicates: dict,
     cells_ok = profile["counts"]["cells_ok"]
     penalty_sum = Decimal(scored["penalty_sum"])
     total_score = Decimal(scored["score"])
+    strata_totals = scored["strata_totals"]
     accounts = [
         _account("rows", "数据行账", counts["raw_records"],
                  counts["accepted"] + counts["quarantine"] + counts["blank"],
@@ -199,6 +203,14 @@ def _reconcile(ingest: dict, profile: dict, missing: dict, duplicates: dict,
         _account("value", "有值格账", cells_value,
                  cells_ok + cells_bad,
                  "有值 = 合格 + 格式不合格"),
+        _account("weight", "权重账", counts["accepted"],
+                 strata_totals["weighted_rows"],
+                 "Σ(渠道权重 × 样本行) = 采纳行，按 0.0001 对账",
+                 quant=config.RATE_QUANT),
+        _account("population", "结构账", Decimal("1"),
+                 strata_totals["pop_sum"],
+                 "有效总体占比合计 = 1（未明层按样本占比自代表）",
+                 quant=config.RATE_QUANT),
         _account("score", "分数账", Decimal("100"), total_score + penalty_sum,
                  "总分 + 扣分 = 100"),
     ]
@@ -212,9 +224,13 @@ def _reconcile(ingest: dict, profile: dict, missing: dict, duplicates: dict,
     }
 
 
-def _account(key: str, label: str, left, right, note: str) -> dict:
+def _account(key: str, label: str, left, right, note: str,
+             quant: Decimal | None = None) -> dict:
     left_dec = Decimal(str(left))
     right_dec = Decimal(str(right))
+    if quant is not None:
+        left_dec = left_dec.quantize(quant, rounding=ROUND_HALF_UP)
+        right_dec = right_dec.quantize(quant, rounding=ROUND_HALF_UP)
     diff = left_dec - right_dec
     return {"key": key, "label": label, "left": left_dec, "right": right_dec,
             "diff": diff, "balanced": diff == 0, "note": note}

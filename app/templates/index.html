@@ -26,12 +26,28 @@
     </div>
     {% endfor %}
   </div>
-  <table class="ledger">
+  <table class="ledger ledger--wide">
     <thead>
+      {% if report.weighting.applied %}
+      <tr><th>维度</th><th class="num">分子</th><th class="num">分母</th><th class="num">样本比率</th><th class="num">加权比率</th><th class="num">容忍度</th><th class="num">扣分</th><th>状态</th></tr>
+      {% else %}
       <tr><th>维度</th><th class="num">比率</th><th class="num">容忍度</th><th class="num">扣分</th><th>状态</th></tr>
+      {% endif %}
     </thead>
     <tbody>
       {% for dim in report.dims %}
+      {% if report.weighting.applied %}
+      <tr>
+        <td>{{ dim.label }}</td>
+        <td class="num">{{ dim.numerator|intf }}</td>
+        <td class="num">{{ dim.denominator|intf }}</td>
+        <td class="num">{{ dim.sample_rate|pct }}</td>
+        <td class="num">{{ dim.rate|pct }}</td>
+        <td class="num">{{ dim.tolerance|pct }}</td>
+        <td class="num">{{ dim.penalty }}</td>
+        <td><span class="sev sev--{{ dim.severity }}">{{ dim.severity_label }}</span>{% if dim.capped %} <span class="tag">封顶</span>{% endif %}</td>
+      </tr>
+      {% else %}
       <tr>
         <td>{{ dim.label }}</td>
         <td class="num">{{ dim.rate|pct }}</td>
@@ -39,10 +55,54 @@
         <td class="num">{{ dim.penalty }}</td>
         <td><span class="sev sev--{{ dim.severity }}">{{ dim.severity_label }}</span>{% if dim.capped %} <span class="tag">封顶</span>{% endif %}</td>
       </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>
+  {% if report.weighting.applied %}
+  <p class="aside">扣分按加权比率计：{{ report.weighting.note }}。</p>
+  {% endif %}
 </section>
+
+{% if report.weighting.applied %}
+<section class="block">
+  <h2 class="block__title">分层权重<span class="block__hint">渠道事后分层 · 总体 = 实际接单结构</span></h2>
+  <table class="ledger ledger--wide">
+    <thead>
+      <tr><th>渠道</th><th class="num">样本行</th><th class="num">样本占比</th><th class="num">有效总体占比</th><th class="num">权重</th><th class="num">加权行</th><th class="num">缺失格</th><th class="num">重复行</th><th class="num">离群格</th><th class="num">格式不合格格</th></tr>
+    </thead>
+    <tbody>
+      {% for stratum in report.strata %}
+      <tr>
+        <td>{{ stratum.label }}</td>
+        <td class="num">{{ stratum.rows|intf }}</td>
+        <td class="num">{{ stratum.sample_share|pct }}</td>
+        <td class="num">{{ stratum.pop_share|pct }}</td>
+        <td class="num">{% if stratum.weight %}{{ stratum.weight }}{% else %}<span class="dash">—</span>{% endif %}</td>
+        <td class="num">{{ stratum.weighted_rows }}</td>
+        <td class="num">{{ stratum.cells_missing|intf }}</td>
+        <td class="num">{{ stratum.rows_dup|intf }}</td>
+        <td class="num">{{ stratum.outlier_cells|intf }}</td>
+        <td class="num">{{ stratum.format_bad|intf }}</td>
+      </tr>
+      {% endfor %}
+      <tr>
+        <td>合计</td>
+        <td class="num">{{ report.strata_totals.rows|intf }}</td>
+        <td class="num">100.00%</td>
+        <td class="num">{{ report.strata_totals.pop_sum|pct }}</td>
+        <td class="num"><span class="dash">—</span></td>
+        <td class="num">{{ report.strata_totals.weighted_rows }}</td>
+        <td class="num">{{ report.counters.cells_missing|intf }}</td>
+        <td class="num">{{ report.counters.rows_dup|intf }}</td>
+        <td class="num">{{ report.counters.outlier_cells|intf }}</td>
+        <td class="num">{{ report.counters.cells_format_bad|intf }}</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="aside">权重 = 有效总体占比 ÷ 样本占比，只乘在层汇总上；每行异常仍是整数计数，可经导出文件逐条追回原始行号。超抽渠道权重 &lt; 1，欠抽渠道权重 &gt; 1；本期未抽中的渠道占比按在样渠道折算。</p>
+</section>
+{% endif %}
 
 <section class="block">
   <h2 class="block__title">列缺失</h2>
@@ -71,7 +131,7 @@
 </section>
 
 <section class="block">
-  <h2 class="block__title">对账<span class="block__hint">{% if report.balanced %}五项平衡{% else %}差异 {{ report.accounts|selectattr("balanced", "equalto", false)|list|length }} 项{% endif %}</span></h2>
+  <h2 class="block__title">对账<span class="block__hint">{% if report.balanced %}{{ report.accounts|length }} 项平衡{% else %}差异 {{ report.accounts|selectattr("balanced", "equalto", false)|list|length }} 项{% endif %}</span></h2>
   <table class="ledger">
     <thead>
       <tr><th>账</th><th class="num">左侧</th><th class="num">右侧</th><th class="num">差额</th><th>结论</th></tr>
@@ -154,6 +214,7 @@
   <h2 class="block__title">导出</h2>
   <p class="links">
     <a class="link" href="/api/export/report.csv">报告 CSV</a>
+    <a class="link" href="/api/export/strata.csv">分层权重 CSV</a>
     <a class="link" href="/api/export/profile.csv">画像 CSV</a>
     <a class="link" href="/api/export/quarantine.csv">隔离区 CSV</a>
     <a class="link" href="/api/export/manifest.json">运行清单 JSON</a>

@@ -39,6 +39,11 @@ def build(result: dict) -> dict:
         "closed": score["closed"],
         "formula": score["formula"],
         "weights": score["weights"],
+        # 旧规则快照没有分层口径：页面隐藏分层区块，只显示样本比率
+        "weighting": score.get("weighting") or {"applied": False},
+        "strata": score.get("strata") or [],
+        "population": score.get("population") or [],
+        "strata_totals": score.get("strata_totals"),
         "dims": dims,
         "bars": bars,
         "bands": score["bands"],

@@ -17,8 +17,8 @@
 | 缺失模式 | 单元格账、连续缺失段（同列连续 ≥3 格）、缺失签名分组、共缺对 |
 | 重复判定 | 全行哈希账与业务键账分开；同键不同值的两行都保留原值并列出冲突列 |
 | 稳健离群 | 中位数 + MAD 稳健 z，MAD=0 回退 IQR/1.349，离散度低于刻度下限判退化 |
-| 评分 | 100 − 缺失 30 − 重复 25 − 离群 20 − 格式 25，每维按容忍度封顶，Decimal 计分 |
-| 批次与导出 | run_id、输入 sha256、版本自增、同输入幂等复用、陈旧提交 409、六种 CSV + 清单 JSON |
+| 评分 | 100 − 缺失 30 − 重复 25 − 离群 20 − 格式 25，每维按容忍度封顶，Decimal 计分；主评分按渠道事后分层加权（总体 = 实际接单结构），超抽渠道自动降权 |
+| 批次与导出 | run_id、输入 sha256、版本自增、同输入幂等复用、陈旧提交 409、七种 CSV + 清单 JSON |
 
 ## 功能模块
 
@@ -29,7 +29,7 @@
 | M3 缺失模式 | `GET /api/missing`、页面 `/missing` | `app/modules/m3_missing/cells.py`、`runs.py`、`matrix.py` | `tests/test_m3_missing.py` |
 | M4 重复判定 | `GET /api/duplicates`、页面 `/duplicates` | `app/modules/m4_duplicates/hashdup.py`、`keydup.py`、`groups.py` | `tests/test_m4_duplicates.py` |
 | M5 稳健离群 | `GET /api/outliers`、页面 `/outliers` | `app/modules/m5_outliers/robust.py`、`zscore.py`、`flags.py` | `tests/test_m5_outliers.py` |
-| M6 评分与批次 | `POST /api/score`、`GET /api/batches`、`GET /api/reconcile`、页面 `/batches` | `app/modules/m6_score/score.py`、`grade.py`、`runstore.py`、`service.py` | `tests/test_m6_score.py` |
+| M6 评分与批次 | `POST /api/score`、`GET /api/batches`、`GET /api/reconcile`、页面 `/batches` | `app/modules/m6_score/score.py`、`strata.py`、`grade.py`、`runstore.py`、`service.py` | `tests/test_m6_score.py` |
 | M7 报告导出 | `GET /`、`GET /api/export/*` | `app/modules/m7_export/report.py`、`csv_out.py`、`manifest_out.py` | `tests/test_m7_export.py` |
 
 ## 核心规则
@@ -43,8 +43,11 @@
    判退化，该列不判离群。阈值固定 `|z| > 3.5`。
 4. **评分**：每维扣分 = 封顶分 × min(1, 实际比率 ÷ 容忍度)，量化 0.01；
    总分 = 100 − 扣分之和，恒在 [0, 100]，`总分 + 扣分之和 = 100` 逐位成立。
+   实际比率按渠道事后分层加权：层权重 = 有效总体占比 ÷ 样本占比，权重只进
+   层汇总，异常计数保持整数可追行号；`Σ(权重×样本行) = 采纳行` 进对账。
 5. **幂等与版本**：同名数据集按内容 sha256 + 规则版本 + 阈值摘要识别，
-   同输入重跑返回同一运行记录；客户端版本落后于库里版本时返回 409。
+   同输入重跑返回同一运行记录（不增版本、不重复累计）；客户端版本落后于
+   库里版本时返回 409。
 
 ## 启动
 
@@ -58,11 +61,11 @@ open http://127.0.0.1:18204/
 
 ## 演示步骤
 
-1. 打开 `/`，样例选 `tickets_dirty.csv`，点「采信并评分」→ 报告页显示 65.24 分 C 级。
+1. 打开 `/`，样例选 `tickets_dirty.csv`，点「采信并评分」→ 报告页显示 65.42 分 C 级。
 2. `/profile` 看待映射列与格式不合格；`/missing` 看连续缺失段与共缺对。
 3. `/duplicates` 看全行重复组与 `T-2026-000204` 的冲突列。
 4. `/outliers` 看 `first_response_min` 的极端值与 `satisfaction` 的退化标记。
-5. `/batches` 看版本、阈值与五项对账；再点「重跑」验证幂等复用。
+5. `/batches` 看版本、阈值与七项对账；再点「重跑」验证幂等复用。
 6. 任一页面底部导出 CSV，或直接 `curl /api/export/manifest.json` 取运行清单。
 
 ## API 与页面
@@ -81,8 +84,8 @@ open http://127.0.0.1:18204/
 | GET | `/api/outliers` | 逐列稳健统计与离群格 |
 | POST | `/api/score` | 跑一次评分（可带 `expected_version`） |
 | GET | `/api/batches` | 运行历史 |
-| GET | `/api/reconcile` | 五项对账 |
-| GET | `/api/export/report.csv` 等 | 六种 CSV + `manifest.json` |
+| GET | `/api/reconcile` | 七项对账 |
+| GET | `/api/export/report.csv` 等 | 七种 CSV + `manifest.json` |
 | GET | `/`、`/profile`、`/missing`、`/duplicates`、`/outliers`、`/batches` | 六个页面 |
 
 ## 目录

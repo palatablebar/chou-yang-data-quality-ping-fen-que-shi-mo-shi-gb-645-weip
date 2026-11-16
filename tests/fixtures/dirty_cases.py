@@ -12,6 +12,7 @@ from app.modules.m4_duplicates import service as duplicate_service
 from app.modules.m5_outliers import service as outlier_service
 from app.modules.m6_score import score as score_module
 from app.modules.m6_score import service as score_service
+from app.modules.m6_score import strata as strata_module
 
 HEADER = ("ticket_id,customer_id,channel,created_at,first_response_min,"
           "handle_hours,satisfaction,agent,region,priority")
@@ -80,6 +81,7 @@ def pipeline(settings, text: str, name: str = "case.csv") -> dict:
 
 
 def score_of(payload: dict) -> dict:
+    """主评分口径：渠道事后分层加权（与 service.run 同一条路径）。"""
     prof = payload["profile"]
     counts = {
         "cells_total": prof["counts"]["cells_total"],
@@ -90,7 +92,9 @@ def score_of(payload: dict) -> dict:
         "outlier_cells": payload["outliers"]["counts"]["outlier_cells"],
         "tested_cells": payload["outliers"]["counts"]["tested_cells"],
     }
-    return score_module.evaluate(counts)
+    strata = strata_module.weigh(
+        strata_module.assign(prof, payload["duplicates"], payload["outliers"]))
+    return score_module.evaluate(counts, strata=strata)
 
 
 def run_text(settings, store, text: str, name: str = "case.csv",

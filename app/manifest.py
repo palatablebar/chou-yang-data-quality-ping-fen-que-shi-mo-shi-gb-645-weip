@@ -30,12 +30,15 @@ def digest_parts(parts: list[str]) -> str:
 
 
 def rules_digest(rule_version: str) -> str:
-    """阈值与权重参与摘要：改一个容忍度，摘要就变，旧结果不会被当成新结果。"""
+    """阈值、权重与总体结构参与摘要：改一个容忍度或一份渠道占比，
+    摘要就变，旧结果不会被当成新结果。"""
     parts = [rule_version]
     for item in config.WEIGHTS:
         parts.append(f"{item['key']}:{item['cap']}:{item['tolerance']}")
     for item in config.GRADES:
         parts.append(f"{item['grade']}:{item['floor']}")
+    for item in config.CHANNEL_POPULATION:
+        parts.append(f"pop:{item['channel']}:{item['share']}")
     parts.extend([f"mad={config.MAD_SCALE}", f"iqr={config.IQR_SCALE}",
                   f"z={config.ROBUST_Z_LIMIT}", f"run={config.MISSING_RUN_MIN}"])
     return digest_parts(parts)

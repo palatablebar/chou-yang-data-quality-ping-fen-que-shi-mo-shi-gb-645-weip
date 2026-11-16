@@ -11,15 +11,20 @@ router = APIRouter(tags=["M6 评分与批次"])
 
 
 def _public(result: dict) -> dict:
+    score = result["score"]
     return {
         "run": result["run"],
-        "score": result["score"]["score"],
-        "grade": result["score"]["grade"],
-        "grade_label": result["score"]["grade_label"],
-        "penalty_sum": result["score"]["penalty_sum"],
-        "dims": result["score"]["dims"],
-        "bands": result["score"]["bands"],
-        "closed": result["score"]["closed"],
+        "score": score["score"],
+        "grade": score["grade"],
+        "grade_label": score["grade_label"],
+        "penalty_sum": score["penalty_sum"],
+        "dims": score["dims"],
+        "bands": score["bands"],
+        "closed": score["closed"],
+        # 旧规则快照没有分层口径：置 None，调用方按未加权展示
+        "weighting": score.get("weighting"),
+        "strata": score.get("strata") or [],
+        "population": score.get("population") or [],
         "replay": result.get("replay", False),
         "counts": result["manifest"]["counters"],
         "reconcile": result["reconcile"],
